@@ -13,6 +13,9 @@ if (CCACHE_PROGRAM)
 	set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
 endif()
 
+find_package(OpenCV REQUIRED)
+
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -30,4 +33,7 @@ set_target_properties(${target_name} PROPERTIES CXX_EXTENSIONS OFF)
 target_compile_options(${target_name} PRIVATE -Wall -Wextra -Werror -pedantic-errors -pedantic -Wconversion -Wsign-conversion)
 
 target_include_directories(freenect2 INTERFACE target/_deps/freenect2-src/include target/_deps/freenect2-build)
-target_link_libraries(${target_name} freenect2)
+target_link_libraries(${target_name} PUBLIC freenect2)
+
+target_include_directories(kinect-to-x11 PUBLIC ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(kinect-to-x11 PUBLIC ${OpenCV_LIBS})
