@@ -62,6 +62,7 @@ void read_from_bin(const char* const path, cv::Mat& mat) {
 			load_color(rows, cols, data, format == libfreenect2::Frame::RGBX, mat);
 			break;
 		case libfreenect2::Frame::Float:
+			load_depth(rows, cols, data, mat);
 			break;
 
 		default:
