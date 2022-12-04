@@ -72,7 +72,7 @@ static void read_from_bin(char const* const path, cv::Mat& mat) {
 	}
 }
 
-void read_from_kinect(cv::Mat& color_mat, cv::Mat& depth_mat) {
+[[maybe_unused]] static void read_from_kinect(cv::Mat& color_mat, cv::Mat& depth_mat) {
 	libfreenect2::Freenect2 ctx;
 
 	if (ctx.enumerateDevices() == 0) {
