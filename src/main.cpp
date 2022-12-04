@@ -12,8 +12,8 @@ constexpr float SCALE = 0.00392f;
 constexpr float CONFIDENCE_THRESHOLD = 0.5f;
 
 // converts RGBX|BGRX to BGR mat
-void load_color(size_t rows, size_t cols, unsigned char* data, bool is_rgb, cv::Mat& mat) {
-	mat = cv::Mat{ static_cast<int>(rows), static_cast<int>(cols), CV_8UC3, data };
+static void load_color(size_t rows, size_t cols, unsigned char const* data, bool is_rgb, cv::Mat& mat) {
+	mat.create(static_cast<int>(rows), static_cast<int>(cols), CV_8UC3);
 
 	for (int row = 0; row < mat.rows; ++row) {
 		for (int col = 0; col < mat.cols; ++col) {
@@ -31,27 +31,27 @@ void load_color(size_t rows, size_t cols, unsigned char* data, bool is_rgb, cv::
 	}
 }
 
-void load_depth(size_t rows, size_t cols, unsigned char* data, cv::Mat& mat) {
+static void load_depth(size_t rows, size_t cols, unsigned char* data, cv::Mat& mat) {
 	mat = cv::Mat{ static_cast<int>(rows), static_cast<int>(cols), CV_32FC1, data };
 }
 
-void read_from_bin(const char* const path, cv::Mat& mat) {
+static void read_from_bin(char const* const path, cv::Mat& mat) {
 	std::ifstream file(path);
-	char buf[sizeof(size_t)];
+	alignas(size_t) char buf[sizeof(size_t)];
 
 	file.read(buf, sizeof(size_t));
-	size_t cols = *(reinterpret_cast<size_t const*>(buf));
+	auto const cols = *(reinterpret_cast<size_t const*>(buf));
 
 	file.read(buf, sizeof(size_t));
-	size_t rows = *(reinterpret_cast<size_t const*>(buf));
+	auto const rows = *(reinterpret_cast<size_t const*>(buf));
 
 	file.read(buf, sizeof(size_t));
-	size_t bytes_per_pixel = *(reinterpret_cast<size_t const*>(buf));
+	auto const bytes_per_pixel = *(reinterpret_cast<size_t const*>(buf));
 
 	file.read(buf, sizeof(size_t));
-	libfreenect2::Frame::Format format = static_cast<libfreenect2::Frame::Format>(*(reinterpret_cast<size_t const*>(buf)));
+	auto const format = static_cast<libfreenect2::Frame::Format>(*(reinterpret_cast<size_t const*>(buf)));
 
-	unsigned char* data = new unsigned char[cols * rows * bytes_per_pixel];
+	auto* const data = new unsigned char[cols * rows * bytes_per_pixel];
 	file.read(reinterpret_cast<char*>(data), static_cast<std::streamsize>(cols * rows * bytes_per_pixel));
 
 	file.close();
@@ -60,6 +60,7 @@ void read_from_bin(const char* const path, cv::Mat& mat) {
 		case libfreenect2::Frame::BGRX:
 		case libfreenect2::Frame::RGBX:
 			load_color(rows, cols, data, format == libfreenect2::Frame::RGBX, mat);
+			delete[] data;
 			break;
 		case libfreenect2::Frame::Float:
 			load_depth(rows, cols, data, mat);
