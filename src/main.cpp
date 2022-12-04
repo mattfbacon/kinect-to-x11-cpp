@@ -1,82 +1,137 @@
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <libfreenect2/frame_listener_impl.h>
 #include <libfreenect2/libfreenect2.hpp>
 #include <libfreenect2/registration.h>
 #include <opencv2/dnn.hpp>
+#include <opencv2/highgui.hpp>
 #include <opencv2/opencv.hpp>
-
-#include "opencv2/highgui.hpp"
-
-using namespace libfreenect2;
 
 constexpr float SCALE = 0.00392f;
 constexpr float CONFIDENCE_THRESHOLD = 0.5f;
 
-int main() {
-	auto net = cv::dnn::readNetFromDarknet("yolo.cfg", "yolo.weights");
-	net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-	net.setPreferableTarget(cv::dnn::DNN_TARGET_OPENCL);
-	auto const out_names = net.getUnconnectedOutLayersNames();
+// converts RGBX|BGRX to BGR mat
+void load_color(size_t rows, size_t cols, unsigned char* data, bool is_rgb, cv::Mat& mat) {
+	mat = cv::Mat{ static_cast<int>(rows), static_cast<int>(cols), CV_8UC3, data };
 
-	namedWindow("window uwu", cv::WINDOW_NORMAL);
+	for (int row = 0; row < mat.rows; ++row) {
+		for (int col = 0; col < mat.cols; ++col) {
+			auto const* image_ent = &data[(row * mat.cols + col) * 4];
+			auto& mat_ent = mat.at<std::array<uint8_t, 3>>(row, col);
+			if (is_rgb) {
+				mat_ent[0] = image_ent[2];
+				mat_ent[2] = image_ent[0];
+			} else {
+				mat_ent[0] = image_ent[0];
+				mat_ent[2] = image_ent[2];
+			}
+			mat_ent[1] = image_ent[1];
+		}
+	}
+}
 
-	Freenect2 ctx;
+void load_depth(size_t rows, size_t cols, unsigned char* data, cv::Mat& mat) {
+	mat = cv::Mat{ static_cast<int>(rows), static_cast<int>(cols), CV_32FC1, data };
+}
+
+void read_from_bin(const char* const path, cv::Mat& mat) {
+	std::ifstream file(path);
+	char buf[sizeof(size_t)];
+
+	file.read(buf, sizeof(size_t));
+	size_t cols = *(reinterpret_cast<size_t const*>(buf));
+
+	file.read(buf, sizeof(size_t));
+	size_t rows = *(reinterpret_cast<size_t const*>(buf));
+
+	file.read(buf, sizeof(size_t));
+	size_t bytes_per_pixel = *(reinterpret_cast<size_t const*>(buf));
+
+	file.read(buf, sizeof(size_t));
+	libfreenect2::Frame::Format format = static_cast<libfreenect2::Frame::Format>(*(reinterpret_cast<size_t const*>(buf)));
+
+	unsigned char* data = new unsigned char[cols * rows * bytes_per_pixel];
+	file.read(reinterpret_cast<char*>(data), static_cast<std::streamsize>(cols * rows * bytes_per_pixel));
+
+	file.close();
+
+	switch (format) {
+		case libfreenect2::Frame::BGRX:
+		case libfreenect2::Frame::RGBX:
+			load_color(rows, cols, data, format == libfreenect2::Frame::RGBX, mat);
+			break;
+		case libfreenect2::Frame::Float:
+			break;
+
+		default:
+			std::cerr << "unknown frame type: " << format << '\n';
+			return;
+	}
+}
+
+void read_from_kinect(cv::Mat& color_mat, cv::Mat& depth_mat) {
+	libfreenect2::Freenect2 ctx;
 
 	if (ctx.enumerateDevices() == 0) {
 		std::cerr << "no devices found\n";
-		return 1;
+		std::exit(1);
 	}
 
 	auto* const dev = ctx.openDefaultDevice();
 
-	SyncMultiFrameListener listener(Frame::Color | Frame::Depth);
-	FrameMap frames;
+	libfreenect2::SyncMultiFrameListener listener(libfreenect2::Frame::Color | libfreenect2::Frame::Depth);
+	libfreenect2::FrameMap frames;
 
 	dev->setColorFrameListener(&listener);
 	dev->setIrAndDepthFrameListener(&listener);
 
 	if (!dev->start()) {
 		std::cerr << "could not start device\n";
-		return 1;
+		std::exit(1);
 	}
 
-	auto* const registration = new Registration(dev->getIrCameraParams(), dev->getColorCameraParams());
-	Frame undistorted(512, 424, 4), registered(512, 424, 4), bigdepth(1920, 1082, 4);
-	bigdepth.format = Frame::Format::Float;
+	auto* const registration = new libfreenect2::Registration(dev->getIrCameraParams(), dev->getColorCameraParams());
+	libfreenect2::Frame undistorted(512, 424, 4), registered(512, 424, 4), bigdepth(1920, 1082, 4);
+	bigdepth.format = libfreenect2::Frame::Format::Float;
+	if (!listener.waitForNewFrame(frames, 10 * 1000)) {
+		std::cerr << "timeout waiting for new frame\n";
+		std::exit(1);
+	}
 
-	for (;;) {
-		if (!listener.waitForNewFrame(frames, 10 * 1000)) {
-			std::cerr << "timeout waiting for new frame\n";
-			return 1;
-		}
+	auto const rgb = frames[libfreenect2::Frame::Color];
+	auto const depth = frames[libfreenect2::Frame::Depth];
 
-		auto const rgb = frames[libfreenect2::Frame::Color];
-		auto const depth = frames[libfreenect2::Frame::Depth];
+	registration->apply(rgb, depth, &undistorted, &registered, true, &bigdepth);
 
-		registration->apply(rgb, depth, &undistorted, &registered, true, &bigdepth);
+	load_color(rgb->height, rgb->width, rgb->data, rgb->format == libfreenect2::Frame::RGBX, color_mat);
+	load_depth(depth->height, depth->width, depth->data, depth_mat);
 
-		// cv::Mat rgb_mat{ static_cast<int>(rgb->height), static_cast<int>(rgb->width), CV_8UC3, rgb->data };
-		cv::Mat rgb_mat{ static_cast<int>(rgb->height), static_cast<int>(rgb->width), CV_8UC3, rgb->data };
-		for (int row = 0; row < rgb_mat.rows; ++row) {
-			for (int col = 0; col < rgb_mat.cols; ++col) {
-				auto const* image_ent = &rgb->data[(row * rgb_mat.cols + col) * 4];
-				auto& mat_ent = rgb_mat.at<std::array<uint8_t, 3>>(col, row);
-				mat_ent[0] = image_ent[0];
-				mat_ent[1] = image_ent[1];
-				mat_ent[2] = image_ent[2];
-			}
-		}
-		cv::Mat depth_mat{ static_cast<int>(depth->height), static_cast<int>(depth->width), CV_32FC1, depth->data };
+	// TODO - do we need to save the listener and free all the frames at the end?
+	// listener.release(frames);
+}
 
+class Processor {
+private:
+	cv::dnn::Net net;
+
+public:
+	Processor() {
+		net = cv::dnn::readNetFromDarknet("yolo.cfg", "yolo.weights");
+		net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+		net.setPreferableTarget(cv::dnn::DNN_TARGET_OPENCL);
+	}
+
+	void process_bgr(cv::Mat mat) {
+		std::vector<cv::String> out_names = net.getLayerNames();
 		std::vector<cv::Mat> outs;
 		{
 			cv::Mat blob;
-			// swap B and R if frame is RGB because OpenCV uses BGR
-			cv::dnn::blobFromImage(rgb_mat, blob, 1.0, cv::Size{ 608, 608 }, cv::Scalar(), rgb->format == libfreenect2::Frame::RGBX, false, CV_8U);
+			// it calls for a BGR frame, we don't swap B and R here because the caller provides a BGR frame
+			cv::dnn::blobFromImage(mat, blob, 1.0, cv::Size{ 608, 608 }, cv::Scalar(), false, false, CV_8U);
 			net.setInput(blob, "", SCALE);
 			if (net.getLayer(0)->outputNameToIndex("im_info") != -1) {
-				cv::Mat image_info = (cv::Mat_<float>(1, 3) << rgb_mat.rows, rgb_mat.cols, 1.6f);
+				cv::Mat image_info = (cv::Mat_<float>(1, 3) << mat.rows, mat.cols, 1.6f);
 				net.setInput(image_info, "im_info");
 			}
 
@@ -90,10 +145,10 @@ int main() {
 					double confidence;
 					cv::minMaxLoc(scores, 0, &confidence, 0, &class_id_point);
 					if (confidence > CONFIDENCE_THRESHOLD) {
-						auto const center_x = static_cast<int>(data[0] * static_cast<float>(rgb_mat.cols));
-						auto const center_y = static_cast<int>(data[1] * static_cast<float>(rgb_mat.rows));
-						auto const width = static_cast<int>(data[2] * static_cast<float>(rgb_mat.cols));
-						auto const height = static_cast<int>(data[3] * static_cast<float>(rgb_mat.rows));
+						auto const center_x = static_cast<int>(data[0] * static_cast<float>(mat.cols));
+						auto const center_y = static_cast<int>(data[1] * static_cast<float>(mat.rows));
+						auto const width = static_cast<int>(data[2] * static_cast<float>(mat.cols));
+						auto const height = static_cast<int>(data[3] * static_cast<float>(mat.rows));
 						auto const left = center_x - width / 2;
 						auto const top = center_y - height / 2;
 						std::cerr << "at rect " << width << "x" << height << "+" << left << "x" << top << " there is " << class_id_point.x << " with confidence "
@@ -103,7 +158,17 @@ int main() {
 			}
 		}
 		std::cerr << "---\n";
-
-		listener.release(frames);
 	}
+};
+
+int main() {
+	Processor p;
+
+	cv::Mat color;
+	read_from_bin("color.bin", color);
+
+	cv::imshow("bgr", color);
+	cv::waitKey(0);
+
+	p.process_bgr(color);
 }
