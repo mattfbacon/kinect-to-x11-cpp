@@ -17,6 +17,7 @@ find_package(OpenCV REQUIRED)
 
 include(FetchContent)
 
+set(BUILD_EXAMPLES OFF)
 FetchContent_Declare(
 	freenect2
 	GIT_REPOSITORY https://github.com/OpenKinect/libfreenect2.git
@@ -31,7 +32,6 @@ target_compile_features(${target_name} PUBLIC cxx_std_20)
 set_target_properties(${target_name} PROPERTIES CXX_EXTENSIONS OFF)
 target_compile_options(${target_name} PRIVATE -Wall -Wextra -Werror -pedantic-errors -pedantic -Wconversion -Wsign-conversion)
 
-option(BUILD_EXAMPLES OFF)
 target_include_directories(freenect2 INTERFACE target/_deps/freenect2-src/include target/_deps/freenect2-build)
 target_link_libraries(${target_name} PUBLIC freenect2)
 
