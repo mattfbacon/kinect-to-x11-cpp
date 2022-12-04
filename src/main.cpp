@@ -116,20 +116,19 @@ static void read_from_bin(char const* const path, cv::Mat& mat) {
 class Processor {
 private:
 	cv::dnn::Net net;
+	cv::Mat blob;
 
 public:
-	Processor() {
-		net = cv::dnn::readNetFromDarknet("yolo.cfg", "yolo.weights");
+	Processor() : net(cv::dnn::readNetFromDarknet("yolo.cfg", "yolo.weights")) {
 		net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
 		net.setPreferableTarget(cv::dnn::DNN_TARGET_OPENCL);
 	}
 
-	void process_bgr(cv::Mat mat) {
+	void process_bgr(cv::Mat const& mat) {
 		std::vector<cv::String> out_names = net.getLayerNames();
 		std::vector<cv::Mat> outs;
 		{
-			cv::Mat blob;
-			// it calls for a BGR frame, we don't swap B and R here because the caller provides a BGR frame
+			// it calls for a BGR frame; we don't swap B and R here because the caller provides a BGR frame
 			cv::dnn::blobFromImage(mat, blob, 1.0, cv::Size{ 608, 608 }, cv::Scalar(), false, false, CV_8U);
 			net.setInput(blob, "", SCALE);
 			if (net.getLayer(0)->outputNameToIndex("im_info") != -1) {
