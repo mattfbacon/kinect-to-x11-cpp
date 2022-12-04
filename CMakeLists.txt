@@ -15,7 +15,6 @@ endif()
 
 find_package(OpenCV REQUIRED)
 
-
 include(FetchContent)
 
 FetchContent_Declare(
