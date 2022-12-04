@@ -5,7 +5,7 @@ SRC_DIR := src
 INCLUDE_DIR := include
 
 build: $(TARGET_DIR)/Makefile
-	cd $(TARGET_DIR) && make
+	cd $(TARGET_DIR) && $(MAKE)
 
 format:
 	clang-format -i $(SRC_DIR)/** $(INCLUDE_DIR)/**
