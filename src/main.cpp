@@ -7,17 +7,18 @@
 #include <opencv2/dnn.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/opencv.hpp>
+#include <vector>
 
 constexpr float SCALE = 0.00392f;
 constexpr float CONFIDENCE_THRESHOLD = 0.5f;
 
 // converts RGBX|BGRX to BGR mat
-static void load_color(size_t rows, size_t cols, unsigned char const* data, bool is_rgb, cv::Mat& mat) {
+static void load_color(size_t rows, size_t cols, std::array<uint8_t, 4> const* data, bool is_rgb, cv::Mat& mat) {
 	mat.create(static_cast<int>(rows), static_cast<int>(cols), CV_8UC3);
 
 	for (int row = 0; row < mat.rows; ++row) {
 		for (int col = 0; col < mat.cols; ++col) {
-			auto const* image_ent = &data[(row * mat.cols + col) * 4];
+			auto const image_ent = data[row * mat.cols + col];
 			auto& mat_ent = mat.at<std::array<uint8_t, 3>>(row, col);
 			if (is_rgb) {
 				mat_ent[0] = image_ent[2];
@@ -31,8 +32,14 @@ static void load_color(size_t rows, size_t cols, unsigned char const* data, bool
 	}
 }
 
-static void load_depth(size_t rows, size_t cols, unsigned char* data, cv::Mat& mat) {
-	mat = cv::Mat{ static_cast<int>(rows), static_cast<int>(cols), CV_32FC1, data };
+static void load_depth(size_t rows, size_t cols, float const* data, cv::Mat& mat) {
+	mat.create(static_cast<int>(rows), static_cast<int>(cols), CV_32FC1);
+
+	for (int row = 0; row < mat.rows; row++) {
+		for (int col = 0; col < mat.cols; col++) {
+			mat.at<float>(row, col) = data[row * mat.cols + col];
+		}
+	}
 }
 
 static void read_from_bin(char const* const path, cv::Mat& mat) {
@@ -51,19 +58,18 @@ static void read_from_bin(char const* const path, cv::Mat& mat) {
 	file.read(buf, sizeof(size_t));
 	auto const format = static_cast<libfreenect2::Frame::Format>(*(reinterpret_cast<size_t const*>(buf)));
 
-	auto* const data = new unsigned char[cols * rows * bytes_per_pixel];
-	file.read(reinterpret_cast<char*>(data), static_cast<std::streamsize>(cols * rows * bytes_per_pixel));
+	std::vector<uint8_t> data(cols * rows * bytes_per_pixel);
+	file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(cols * rows * bytes_per_pixel));
 
 	file.close();
 
 	switch (format) {
 		case libfreenect2::Frame::BGRX:
 		case libfreenect2::Frame::RGBX:
-			load_color(rows, cols, data, format == libfreenect2::Frame::RGBX, mat);
-			delete[] data;
+			load_color(rows, cols, reinterpret_cast<std::array<uint8_t, 4> const*>(data.data()), format == libfreenect2::Frame::RGBX, mat);
 			break;
 		case libfreenect2::Frame::Float:
-			load_depth(rows, cols, data, mat);
+			load_depth(rows, cols, reinterpret_cast<const float*>(data.data()), mat);
 			break;
 
 		default:
@@ -106,11 +112,10 @@ static void read_from_bin(char const* const path, cv::Mat& mat) {
 
 	registration->apply(rgb, depth, &undistorted, &registered, true, &bigdepth);
 
-	load_color(rgb->height, rgb->width, rgb->data, rgb->format == libfreenect2::Frame::RGBX, color_mat);
-	load_depth(depth->height, depth->width, depth->data, depth_mat);
+	load_color(rgb->height, rgb->width, reinterpret_cast<std::array<uint8_t, 4> const*>(rgb->data), rgb->format == libfreenect2::Frame::RGBX, color_mat);
+	load_depth(depth->height, depth->width, reinterpret_cast<float const*>(depth->data), depth_mat);
 
-	// TODO - do we need to save the listener and free all the frames at the end?
-	// listener.release(frames);
+	listener.release(frames);
 }
 
 class Processor {
@@ -165,10 +170,12 @@ public:
 int main() {
 	Processor p;
 
-	cv::Mat color;
+	cv::Mat color, depth;
 	read_from_bin("color.bin", color);
+	read_from_bin("bigdepth.bin", depth);
 
 	cv::imshow("bgr", color);
+	cv::imshow("depth", depth);
 	cv::waitKey(0);
 
 	p.process_bgr(color);
